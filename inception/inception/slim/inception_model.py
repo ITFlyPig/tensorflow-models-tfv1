@@ -45,8 +45,8 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from inception.slim import ops
-from inception.slim import scopes
+from tensorflow.contrib.slim import ops
+from tensorflow.contrib.slim import scopes
 
 
 def inception_v3(inputs,
