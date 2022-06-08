@@ -22,7 +22,7 @@ import shutil
 import sys
 
 import tensorflow as tf
-
+# 列名
 _CSV_COLUMNS = [
     'age', 'workclass', 'fnlwgt', 'education', 'education_num',
     'marital_status', 'occupation', 'relationship', 'race', 'gender',
@@ -30,9 +30,11 @@ _CSV_COLUMNS = [
     'income_bracket'
 ]
 
+# 列的默认值
 _CSV_COLUMN_DEFAULTS = [[0], [''], [0], [''], [0], [''], [''], [''], [''], [''],
                         [0], [0], [0], [''], ['']]
 
+# 设置命令行参数
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
@@ -68,7 +70,7 @@ _NUM_EXAMPLES = {
 
 
 def build_model_columns():
-    """Builds a set of wide and deep feature columns."""
+    """为广度和深度构建特征列"""
     # Continuous columns
     age = tf.feature_column.numeric_column('age')
     education_num = tf.feature_column.numeric_column('education_num')
@@ -97,7 +99,7 @@ def build_model_columns():
             'Self-emp-not-inc', 'Private', 'State-gov', 'Federal-gov',
             'Local-gov', '?', 'Self-emp-inc', 'Without-pay', 'Never-worked'])
 
-    # To show an example of hashing:
+    # 职业不是连续，且值多
     occupation = tf.feature_column.categorical_column_with_hash_bucket(
         'occupation', hash_bucket_size=1000)
 
@@ -111,6 +113,7 @@ def build_model_columns():
         age_buckets,
     ]
 
+    # 主要是考虑到不同的年龄、不同职业和不同受教育程度的收入是不一样的
     crossed_columns = [
         tf.feature_column.crossed_column(
             ['education', 'occupation'], hash_bucket_size=1000),
@@ -138,12 +141,26 @@ def build_model_columns():
 
 
 def build_estimator(model_dir, model_type):
-    """Build an estimator appropriate for the given model type."""
+    # 使用给定的模型构建一个estimator
+
     wide_columns, deep_columns = build_model_columns()
+
+    # 使用 hidden_units 定义神经网络的结构。hidden_units 参数会创建一个整数列表，其中每个整数对应一个隐藏层，表示其中的节点数。以下面的赋值为例：
+    #
+    # hidden_units=[3,10]
+    #
+    # 上述赋值为神经网络指定了两个隐藏层：
+    #
+    # 第一个隐藏层包含 3 个节点。
+    # 第二个隐藏层包含 10 个节点。
+    # 如果我们想要添加更多层，可以向该列表添加更多整数。例如，hidden_units=[10,20,30,40] 会创建 4 个分别包含 10、20、30 和 40 个单元的隐藏层。
+    #
+    # 默认情况下，所有隐藏层都会使用 ReLu 激活函数，且是全连接层。
     hidden_units = [100, 75, 50, 25]
 
     # Create a tf.estimator.RunConfig to ensure the model is run on CPU, which
     # trains faster than GPU for this model.
+    # 创建运行配置，确保只在cpu上运行
     run_config = tf.estimator.RunConfig().replace(
         session_config=tf.ConfigProto(device_count={'GPU': 0}))
 
@@ -168,46 +185,56 @@ def build_estimator(model_dir, model_type):
 
 
 def input_fn(data_file, num_epochs, shuffle, batch_size):
-    """Generate an input function for the Estimator."""
+    """为 Estimator 生成输入函数"""
     assert tf.gfile.Exists(data_file), (
             '%s not found. Please make sure you have either run data_download.py or '
             'set both arguments --train_data and --test_data.' % data_file)
 
     def parse_csv(value):
         print('Parsing', data_file)
+        # 将CSV记录转换为张量。每一列映射到一个张量。
         columns = tf.decode_csv(value, record_defaults=_CSV_COLUMN_DEFAULTS)
+        # 将每一行的数据转为名字和值对应
         features = dict(zip(_CSV_COLUMNS, columns))
+        # 获取income_bracket对应的值
         labels = features.pop('income_bracket')
         return features, tf.equal(labels, '>50K')
 
-    # Extract lines from input files using the Dataset API.
+    # 使用 Dataset API 从输入文件中提取行
     dataset = tf.data.TextLineDataset(data_file)
 
     if shuffle:
+        # 将数据打乱，提高随机度，可以提高模型训练效果。
         dataset = dataset.shuffle(buffer_size=_NUM_EXAMPLES['train'])
 
+    # map可以将map_func函数映射到数据集.
+    # map接收一个函数，Dataset中的每个元素都会被当作这个函数的输入，并将函数返回值作为新的Dataset，
     dataset = dataset.map(parse_csv, num_parallel_calls=5)
 
-    # We call repeat after shuffling, rather than before, to prevent separate
-    # epochs from blending together.
+    # 重复此数据集次数，主要用来处理机器学习中的epoch，假设原先的数据训练一个epoch，使用repeat(2)就可以将之变成2个epoch，默认空是无限次。
     dataset = dataset.repeat(num_epochs)
+    # batch 设置每个batch取的个数batch_size
     dataset = dataset.batch(batch_size)
 
     iterator = dataset.make_one_shot_iterator()
+    # 返回包含下一个元素的tf.Tensor张量
     features, labels = iterator.get_next()
     return features, labels
 
 
 def main(unused_argv):
-    # Clean up the model directory if present
+    # 清空model目录
     shutil.rmtree(FLAGS.model_dir, ignore_errors=True)
+    # 构建estimator
     model = build_estimator(FLAGS.model_dir, FLAGS.model_type)
 
+    # 训练和评估模型
     # Train and evaluate the model every `FLAGS.epochs_per_eval` epochs.
     for n in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
+        # 训练
         model.train(input_fn=lambda: input_fn(
             FLAGS.train_data, FLAGS.epochs_per_eval, True, FLAGS.batch_size))
-
+        # 评估
         results = model.evaluate(input_fn=lambda: input_fn(
             FLAGS.test_data, 1, False, FLAGS.batch_size))
 
@@ -220,6 +247,9 @@ def main(unused_argv):
 
 
 if __name__ == '__main__':
+    # 设置日志级别
     tf.logging.set_verbosity(tf.logging.INFO)
+    # 命令行参数解析
     FLAGS, unparsed = parser.parse_known_args()
+    # 使用tf执行
     tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
